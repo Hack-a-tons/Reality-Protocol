@@ -1,0 +1,28 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// --- UWB CONFIGURATION ---
+// List of tags to search for in the loop
+const char* TARGET_TAGS[] = {
+  "TAG001", 
+  "TAG002", 
+  "TAG003"
+};
+const int NUM_TAGS = sizeof(TARGET_TAGS) / sizeof(TARGET_TAGS[0]);
+
+// --- WIFI CONFIGURATION ---
+struct WiFiCreds {
+  const char* ssid;
+  const char* password;
+};
+
+// Add as many networks as you want. 
+// The ESP32 will scan and connect to the one with the strongest signal.
+WiFiCreds KNOWN_NETWORKS[] = {
+  {"Hackathon_WiFi", "hackathon_password"},
+  {"My_Hotspot", "hotspot_password"},
+  {"Home_WiFi", "home_password"}
+};
+const int NUM_NETWORKS = sizeof(KNOWN_NETWORKS) / sizeof(KNOWN_NETWORKS[0]);
+
+#endif

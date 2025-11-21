@@ -1,91 +1,127 @@
 #include <HardwareSerial.h>
-#include <LiquidCrystal_I2C.h> 
+#include <LiquidCrystal_I2C.h>
+#include "config.h"            // Import your settings
+#include "SmartWiFiConnect.h"  // Import WiFi logic
 
-// 1. Setup UWB on REMAPPED pins for WROVER (RX=4, TX=18)
-// We use "Serial2" but map it to custom pins
-HardwareSerial UWBSerial(2); 
-#define UWB_RX_PIN 4  // Connect UWB TX to this
-#define UWB_TX_PIN 18 // Connect UWB RX to this
+// --- HARDWARE DEFINITIONS ---
+// UWB Remapped Pins for ESP32-WROVER
+#define UWB_RX_PIN 4  
+#define UWB_TX_PIN 18
+HardwareSerial UWBSerial(2);
 
-// 2. Setup LCD (Address 0x27 is common, if it fails try 0x3F)
+// LCD Address (Try 0x27 or 0x3F)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+int currentTagIndex = 0;
 
 void setup() {
   Serial.begin(115200);
   
-  // --- Init LCD ---
+  // 1. Init LCD
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
+  lcd.print("Reality Protocol");
+  lcd.setCursor(0, 1);
   lcd.print("Booting...");
-
-  // --- Init UWB ---
-  // Important: Define the custom pins here
-  UWBSerial.begin(115200, SERIAL_8N1, UWB_RX_PIN, UWB_TX_PIN);
   delay(1000);
 
+  // 2. Smart WiFi Connection
+  lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Config Anchor...");
+  lcd.print("Scanning WiFi...");
   
-  // --- Configure Local Module as ANCHOR ---
+  String connectedSSID = connectToStrongestNetwork();
+  
+  lcd.clear();
+  if (WiFi.status() == WL_CONNECTED) {
+    lcd.setCursor(0, 0);
+    lcd.print("WiFi: OK");
+    lcd.setCursor(0, 1);
+    lcd.print(connectedSSID);
+    Serial.println("WiFi Connected: " + connectedSSID);
+  } else {
+    lcd.setCursor(0, 0);
+    lcd.print("WiFi: FAILED");
+    lcd.setCursor(0, 1);
+    lcd.print("Offline Mode");
+    Serial.println("WiFi Failed. Continuing in Offline Mode.");
+  }
+  delay(2000); // Let user read the status
+
+  // 3. Init UWB
+  UWBSerial.begin(115200, SERIAL_8N1, UWB_RX_PIN, UWB_TX_PIN);
+  lcd.clear();
+  lcd.print("Config UWB...");
+  
+  // Configure Local Module as ANCHOR
   sendAT("AT+MODE=1"); 
-  delay(500);
+  delay(200);
   sendAT("AT+NETWORKID=FREENOVE");
-  delay(500);
+  delay(200);
   sendAT("AT+ADDRESS=ANCHOR1");
   delay(500);
 
   lcd.clear();
-  lcd.print("Radar Active");
 }
 
 void loop() {
-  // --- 1. Ping the Tag ---
-  // We assume the other module is named TAG001
-  UWBSerial.println("AT+ANCHOR_SEND=TAG001,5,PING");
+  // Cycle through tags defined in config.h
+  String targetTag = TARGET_TAGS[currentTagIndex];
+  
+  // 1. Ping the current tag
+  // "2" is data length (just a ping), "Q" is dummy payload
+  UWBSerial.print("AT+ANCHOR_SEND=");
+  UWBSerial.print(targetTag);
+  UWBSerial.println(",2,Q");
 
-  // --- 2. Read Response ---
+  // 2. Read Response
   String response = readResponse();
   
-  // --- 3. Parse Distance ---
-  // Response format: +ANCHOR_RCV:TAG001,5,DIST:150.5,PING
+  // 3. Parse Distance
   int distIdx = response.indexOf("DIST:");
   
   lcd.setCursor(0, 0);
-  lcd.print("Target: TAG001");
+  lcd.print("Target: " + targetTag + "   "); // Spaces clear leftovers
   
   if (distIdx > 0) {
-    // Find the comma after the distance to isolate the number
+    // Parse logic
     int endIdx = response.indexOf(",", distIdx);
     String distStr = response.substring(distIdx + 5, endIdx);
     float distCm = distStr.toFloat();
     
     // Update LCD
     lcd.setCursor(0, 1);
-    lcd.print("Dist: " + String(distCm) + " cm    "); // Extra spaces clear old text
+    lcd.print("Dist: " + String(distCm) + " cm    ");
+    Serial.println(targetTag + ": " + String(distCm) + "cm");
     
-    // Print to Serial for debugging
-    Serial.println("Distance: " + String(distCm) + "cm");
+    // Note: We only switch tags if we DON'T find this one? 
+    // Or switch constantly? 
+    // For "Radar" effect, let's switch constantly to scan the room.
+    currentTagIndex++;
   } else {
-    // Tag not found
     lcd.setCursor(0, 1);
     lcd.print("Searching...    ");
+    
+    // Move to next tag to keep scanning
+    currentTagIndex++;
   }
+
+  // Loop index back to 0 if we hit the end of the array
+  if (currentTagIndex >= NUM_TAGS) currentTagIndex = 0;
   
-  delay(100); // Fast refresh
+  delay(200); 
 }
 
 void sendAT(String cmd) {
   UWBSerial.println(cmd);
-  // Clear buffer to keep it clean
   while(UWBSerial.available()) UWBSerial.read(); 
 }
 
 String readResponse() {
   String r = "";
   long t = millis();
-  // Wait 100ms for a reply
-  while(millis() - t < 100) { 
+  while(millis() - t < 150) { // Wait 150ms for response
     while(UWBSerial.available()) r += (char)UWBSerial.read();
   }
   return r;
